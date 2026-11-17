@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>BotW Save Converter</title>
+<meta name="description" content="Convert a Breath of the Wild save between Wii U (Cemu) and Switch (Ryujinx). Runs entirely in your browser; the save never leaves your computer.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Marcellus&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one centred working column; drop zone, then result, then the byte-level explainer. */
+:root {
+  --bg: #edf1f1; --surface: #f8fafa; --fg: #172326; --muted: #586a6e; --line: #cdd8d9;
+  --accent: #0b7f96; --accent-ink: #ffffff; --wiiu: #1c64c4; --switch: #d1203b;
+  --keep: #b07a0a; --keep-bg: #f6ead0; --ok: #1d7a4a; --err: #b42335;
+  --display: "Marcellus", "Iowan Old Style", Georgia, serif;
+  --body: "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e1517; --surface: #152023; --fg: #e2ebeb; --muted: #94a7aa; --line: #2a3a3e;
+  --accent: #41c3dc; --accent-ink: #062126; --wiiu: #6ea6f0; --switch: #f0677c;
+  --keep: #e6b54a; --keep-bg: #3a2f14; --ok: #5fd197; --err: #f2808f; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0e1517; --surface: #152023; --fg: #e2ebeb; --muted: #94a7aa; --line: #2a3a3e;
+  --accent: #41c3dc; --accent-ink: #062126; --wiiu: #6ea6f0; --switch: #f0677c;
+  --keep: #e6b54a; --keep-bg: #3a2f14; --ok: #5fd197; --err: #f2808f; color-scheme: dark }
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--fg); font: 15px/1.55 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 40px 64px }
+main { max-width: 760px; margin: 0 auto; display: grid; gap: 28px }
+h1 { font: 400 clamp(30px, 6vw, 44px)/1.1 var(--display); margin: 0; letter-spacing: .01em; text-wrap: balance }
+h2 { font: 400 22px/1.2 var(--display); margin: 0; text-wrap: balance }
+p { margin: 0; max-width: 65ch }
+.lede { color: var(--muted) }
+header { display: grid; gap: 10px }
+.route { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font: 500 13px var(--body); letter-spacing: .06em; text-transform: uppercase }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; border: 1px solid currentColor }
+.chip.wiiu { color: var(--wiiu) } .chip.switch { color: var(--switch) }
+.arrows { color: var(--muted) }
+
+.drop { border: 1.5px dashed var(--line); border-radius: 14px; background: var(--surface); padding: 28px 22px;
+  display: grid; gap: 14px; justify-items: start; transition: border-color .15s, background .15s }
+.drop.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)) }
+.drop .hint { color: var(--muted); font-size: 14px }
+.btns { display: flex; flex-wrap: wrap; gap: 10px }
+button, .btn { font: 600 14px var(--body); border-radius: 9px; padding: 10px 16px; cursor: pointer; border: 1px solid var(--line);
+  background: transparent; color: var(--fg) }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink) }
+button:disabled { opacity: .5; cursor: default }
+button:focus-visible, .drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px }
+input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none }
+
+.result { display: grid; gap: 16px }
+.status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px }
+.status .ver { font: 500 13px var(--mono); color: var(--muted) }
+.msg { font-size: 14px } .msg.ok { color: var(--ok) } .msg.err { color: var(--err) }
+.files { border-top: 1px solid var(--line); max-height: 320px; overflow: auto }
+.files table { width: 100%; border-collapse: collapse; font-size: 13px }
+.files td { padding: 6px 4px; border-bottom: 1px solid var(--line); vertical-align: top }
+.files td:first-child { font-family: var(--mono); word-break: break-all }
+.files td:last-child { color: var(--muted); text-align: right; white-space: nowrap }
+.files tr.skip td { color: var(--muted); text-decoration: line-through }
+.files tr.skip td:last-child { text-decoration: none }
+.counts { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums }
+.counts b { color: var(--fg); font-weight: 600 }
+
+section.how { display: grid; gap: 14px; border-top: 1px solid var(--line); padding-top: 24px }
+.hex { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px }
+.hex table { border-collapse: collapse; font: 13px/1.7 var(--mono); font-variant-numeric: tabular-nums }
+.hex th { font: 500 11px var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); text-align: left; padding: 0 18px 4px 0 }
+.hex td { padding: 0 18px 0 0; white-space: nowrap }
+.hex .w { color: var(--wiiu) } .hex .s { color: var(--switch) }
+.hex .k { background: var(--keep-bg); color: var(--keep); border-radius: 3px; padding: 0 3px }
+.rules { display: grid; gap: 8px; padding-left: 20px; margin: 0; max-width: 65ch }
+.where { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)) }
+.where div { display: grid; gap: 4px; align-content: start; min-width: 0 }
+.where h3 { font: 600 14px var(--body); margin: 0 }
+.where p, .where code { font-size: 13px; color: var(--muted) }
+code { font-family: var(--mono); font-size: .92em; word-break: break-all }
+.foot { font-size: 13px; color: var(--muted) }
+@media (prefers-reduced-motion: reduce) { .drop { transition: none } }
+</style>
+</head>
+<body>
+
+<main>
+  <header>
+    <div class="route" aria-hidden="true"><span class="chip wiiu">Wii U · Cemu</span><span class="arrows">⇄</span><span class="chip switch">Switch · Ryujinx</span></div>
+    <h1>Breath of the Wild save converter</h1>
+    <p class="lede">Pick a whole BotW save folder. It works out which console it came from and converts it to the other one. Everything runs in this page; your save never leaves your computer.</p>
+  </header>
+
+  <div class="drop" id="drop">
+    <h2>Your save folder</h2>
+    <p class="hint">The folder that holds <code>option.sav</code> and the numbered folders <code>0</code>–<code>5</code>. On Cemu that is <code>…/mlc01/usr/save/00050000/101c9400/user/80000001</code>. Drag it here or choose it.</p>
+    <div class="btns">
+      <label class="btn" for="pick" id="pickLabel" tabindex="0">Choose folder…</label>
+      <input type="file" id="pick" webkitdirectory directory multiple>
+    </div>
+  </div>
+
+  <section class="result" id="result" aria-live="polite">
+    <div class="status">
+      <h2 id="resTitle">Example: a Cemu save</h2>
+      <span class="ver" id="resVer">header 0x471b · v1.4 layout</span>
+    </div>
+    <div class="route" id="resRoute"><span class="chip wiiu">Wii U</span><span class="arrows">→</span><span class="chip switch">Switch</span></div>
+    <div class="counts" id="counts"><span><b>13</b> flag files swapped</span><span><b>7</b> tracker blocks</span><span><b>26</b> files copied</span><span><b>1</b> skipped</span></div>
+    <div class="files"><table><tbody id="fileRows">
+      <tr><td>0/game_data.sav</td><td>swapped, 1,679 text words kept</td></tr>
+      <tr><td>0/caption.sav</td><td>swapped, 6 text words kept</td></tr>
+      <tr><td>tracker/trackblock00.sav</td><td>tracker</td></tr>
+      <tr><td>album/pict_000.jpg</td><td>copied</td></tr>
+      <tr class="skip"><td>game_data.sav</td><td>not a real game_data.sav (344 bytes)</td></tr>
+    </tbody></table></div>
+    <div class="btns">
+      <button class="primary" id="save" disabled>Save converted .zip</button>
+      <button id="reset" hidden>Convert another</button>
+    </div>
+    <p class="msg" id="msg">This is a sample of what you will see. Choose your folder above to convert it.</p>
+  </section>
+
+  <section class="how">
+    <h2>What changes in the file</h2>
+    <p>A save is a list of game flags, each a 4-byte name hash and a 4-byte value. The Wii U stores numbers big-endian and the Switch little-endian, so every number is byte-reversed. Item and place names are text and stay exactly as they are. These are real bytes from slot 1:</p>
+    <div class="hex"><table>
+      <thead><tr><th>Offset</th><th>Wii U</th><th>Switch</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td>0x0000</td><td class="w">00 00 47 1b</td><td class="s">1b 47 00 00</td><td>save version</td></tr>
+        <tr><td>0xcc00</td><td class="w">22 a5 10 d1</td><td class="s">d1 10 a5 22</td><td>hash of a pouch-item flag</td></tr>
+        <tr><td>0xcc04</td><td><span class="k">49 74 65 6d</span></td><td><span class="k">49 74 65 6d</span></td><td>“Item”, text kept</td></tr>
+        <tr><td>0xcc0c</td><td><span class="k">5f 45 6e 65</span></td><td><span class="k">5f 45 6e 65</span></td><td>“_Ene”, text kept</td></tr>
+      </tbody>
+    </table></div>
+    <ul class="rules">
+      <li><b>game_data.sav, caption.sav, option.sav:</b> every word reversed, except values of text flags (known hashes, or values starting with a known name like <code>Item</code>, <code>Weap</code>, <code>Obj_</code>).</li>
+      <li><b>trackblock*.sav</b> (Hero’s Path): first word as is, second word as two 16-bit values, the rest reversed.</li>
+      <li><b>Pictures</b> (album, Hyrule Compendium, slot thumbnails) are plain JPEGs and copied unchanged.</li>
+      <li>Same rules as BotWSaveManager 1.1.4, checked byte for byte against its output. Older saves are upgraded by the game when it loads them.</li>
+    </ul>
+    <h2>Where the converted save goes</h2>
+    <div class="where">
+      <div><h3>Ryujinx (Switch)</h3><p>Right-click the game → Open User Save Directory. Back up what is there, then unzip into it so <code>option.sav</code> and <code>0</code>–<code>5</code> sit at the top.</p></div>
+      <div><h3>Cemu (Wii U)</h3><p>Unzip into</p><code>mlc01/usr/save/00050000/101c9400/user/80000001</code></div>
+      <div><h3>Real console</h3><p>Restore with JKSV or Checkpoint on Switch, SaveMii on Wii U, using the same folder layout.</p></div>
+    </div>
+    <p class="foot">Keep a copy of your original save until you have loaded the converted one in the game.</p>
+  </section>
+</main>
+
+<script>
+// BotW save converter core: Wii U (big-endian) <-> Switch (little-endian).
+// Same rules as BotWSaveManager 1.1.4: every 32-bit word is byte-swapped except string
+// chunks (kept in file order on both consoles); trackblock headers are special.
+(function (root) {
+  "use strict";
+
+  // Flag hashes whose values are strings (both byte orders), from BotWSaveManager.
+  const STRING_HASHES = new Set([
+    0x7B74E117, 0xD913B769, 0xB666D246, 0x021A6FF2, 0xFF74960F, 0x8932285F, 0x3B0A289B,
+    0x2F95768F, 0x9C6CFD3F, 0xBBAC416B, 0xCCAB71FD, 0xCBC6B5E4, 0x2CADB0E7, 0xA6EB3EF4,
+    0x21D4CFFA, 0x22A510D1, 0x98D10D53, 0x55A22047, 0xE5A63A33, 0xBEC65061, 0xBC118370,
+    0x0E9D0E75,
+  ].flatMap((h) => [h >>> 0, swap32(h)]));
+
+  // Any flag with a value starting with one of these is also a string flag.
+  const PREFIXES = ("Item Weap Armo Fire Norm IceA Elec Bomb Anci Anim Obj_ Game Dm_N Dm_A " +
+    "Dm_E Dm_P FldO Gano Gian Grea KeyS Kokk Liza Mann Mori Npc_ OctO Octa arro Pict PutR " +
+    "Rema Site TBox TwnO Prie Dye0 Dye1 Map Play Oasi Cele Wolf Gata Ston Kaka Soji Hyru " +
+    "Powe Lana Hate Akka Yash Dung BeeH Boar Boko Brig DgnO").split(" ");
+
+  const VERSIONS = {
+    0x24e2: "v1.0", 0x24ee: "v1.1", 0x3ef8: "v1.2", 0x3ef9: "v1.3", 0x471a: "v1.3.3",
+    0x471b: "v1.4", 0x471e: "v1.5", 0x0f423d: "v1.6",
+  };
+
+  function swap32(x) {
+    return (((x & 0xff) << 24) | ((x & 0xff00) << 8) | ((x >>> 8) & 0xff00) | (x >>> 24)) >>> 0;
+  }
+
+  function startsWithPrefix(b, i) {
+    for (const p of PREFIXES) {
+      let ok = true;
+      for (let k = 0; k < p.length; k++) if (b[i + k] !== p.charCodeAt(k)) { ok = false; break; }
+      if (ok) return true;
+    }
+    return false;
+  }
+
+  function rev4(src, dst, i) {
+    dst[i] = src[i + 3]; dst[i + 1] = src[i + 2]; dst[i + 2] = src[i + 1]; dst[i + 3] = src[i];
+  }
+
+  // Header word 0 is the save version: 00 00 47 1e on Wii U, 1e 47 00 00 on Switch.
+  function detect(bytes) {
+    if (bytes.length < 12) return null;
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const be = dv.getUint32(0, false), le = dv.getUint32(0, true);
+    if (VERSIONS[be]) return { console: "wiiu", version: VERSIONS[be], header: be };
+    if (VERSIONS[le]) return { console: "switch", version: VERSIONS[le], header: le };
+    return null;
+  }
+
+  // game_data.sav, caption.sav, option.sav: 12-byte header then (hash, value) pairs.
+  function convertFlags(src) {
+    const dst = new Uint8Array(src.length);
+    const dv = new DataView(src.buffer, src.byteOffset, src.byteLength);
+    const n = src.length & ~3;
+    const strings = new Set(STRING_HASHES);
+    for (let i = 12; i + 8 <= n; i += 8)
+      if (startsWithPrefix(src, i + 4)) strings.add(dv.getUint32(i, false));
+    let kept = 0;
+    for (let i = 0; i < n; i += 4) {
+      const isValue = i >= 12 && ((i - 12) & 4) && strings.has(dv.getUint32(i - 4, false));
+      if (isValue) { dst.set(src.subarray(i, i + 4), i); if (dv.getUint32(i)) kept++; } else rev4(src, dst, i);
+    }
+    dst.set(src.subarray(n), n);
+    return { bytes: dst, kept };
+  }
+
+  // trackblockNN.sav: word 0 as is, word 1 is two 16-bit values, the rest 32-bit values.
+  function convertTrackblock(src) {
+    const dst = new Uint8Array(src);
+    if (src.length < 8) return dst;
+    dst[4] = src[5]; dst[5] = src[4]; dst[6] = src[7]; dst[7] = src[6];
+    const n = src.length & ~3;
+    for (let i = 8; i < n; i += 4) rev4(src, dst, i);
+    return dst;
+  }
+
+  const VALID_GAME_DATA_SIZES = new Set([896976, 897160, 897112, 907824, 1020648, 1027208, 1027216]);
+
+  // files: [{path: "0/game_data.sav", bytes: Uint8Array}], path relative to the save root.
+  // Returns {from, to, version, files: [{path, bytes, action}], skipped: [{path, reason}]}.
+  function convertFolder(files) {
+    const norm = (p) => p.replace(/\\/g, "/").replace(/^\/+/, "");
+    let list = files.map((f) => ({ path: norm(f.path), bytes: f.bytes }));
+    const findSlot = () => list.find((f) => /^[0-7]\/game_data\.sav$/.test(f.path) && detect(f.bytes));
+    // A picked folder arrives as "80000001/0/game_data.sav": drop leading folders until
+    // the numbered slots sit at the top.
+    let slot = findSlot();
+    for (let depth = 0; !slot && depth < 8 && list.every((f) => f.path.includes("/")); depth++) {
+      list = list.map((f) => ({ path: f.path.slice(f.path.indexOf("/") + 1), bytes: f.bytes }));
+      slot = findSlot();
+    }
+    if (!slot) throw new Error("No numbered save slot (0/game_data.sav … 5/game_data.sav) found. Pick the folder that holds option.sav and the 0–5 folders.");
+    const info = detect(slot.bytes);
+    const from = info.console, to = from === "wiiu" ? "switch" : "wiiu";
+    const out = [], skipped = [];
+    for (const f of list) {
+      const name = f.path.split("/").pop();
+      if (name === ".DS_Store" || name.startsWith("._")) { skipped.push({ path: f.path, reason: "macOS metadata" }); continue; }
+      if (/^trackblock\d+\.sav$/.test(name)) { out.push({ path: f.path, bytes: convertTrackblock(f.bytes), action: "tracker" }); continue; }
+      if (name === "game_data.sav" || name === "caption.sav" || name === "option.sav") {
+        const d = detect(f.bytes);
+        if (!d) { skipped.push({ path: f.path, reason: "unrecognised header" }); continue; }
+        if (name === "game_data.sav" && !VALID_GAME_DATA_SIZES.has(f.bytes.length)) {
+          skipped.push({ path: f.path, reason: `not a real game_data.sav (${f.bytes.length} bytes)` }); continue;
+        }
+        if (d.console !== from) {
+          out.push({ path: f.path, bytes: new Uint8Array(f.bytes), action: "already in target format, copied" }); continue;
+        }
+        const r = convertFlags(f.bytes);
+        out.push({ path: f.path, bytes: r.bytes, action: `swapped, ${r.kept} text words kept` });
+        continue;
+      }
+      out.push({ path: f.path, bytes: new Uint8Array(f.bytes), action: "copied" });
+    }
+    return { from, to, version: info.version, files: out, skipped };
+  }
+
+  const api = { convertFolder, convertFlags, convertTrackblock, detect, VERSIONS };
+  if (typeof module === "object" && module.exports) module.exports = api;
+  else root.BotWConv = api;
+})(typeof self !== "undefined" ? self : this);
+
+</script>
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  let converted = null;
+
+  // Store-only zip writer (no compression; saves are small and mostly unique bytes).
+  const CRC = new Uint32Array(256).map((_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc32 = (b) => { let c = 0xffffffff; for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  function makeZip(files) {
+    const enc = new TextEncoder(), parts = [], central = [];
+    const d = new Date(), time = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+    const date = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+    let off = 0;
+    for (const f of files) {
+      const name = enc.encode(f.path), crc = crc32(f.bytes), n = f.bytes.length;
+      const lh = new DataView(new ArrayBuffer(30));
+      [[0, 0x04034b50, 4], [4, 20, 2], [6, 0x0800, 2], [8, 0, 2], [10, time, 2], [12, date, 2], [14, crc, 4], [18, n, 4], [22, n, 4], [26, name.length, 2], [28, 0, 2]]
+        .forEach(([o, v, s]) => s === 4 ? lh.setUint32(o, v, true) : lh.setUint16(o, v, true));
+      parts.push(lh.buffer, name, f.bytes);
+      const ch = new DataView(new ArrayBuffer(46));
+      [[0, 0x02014b50, 4], [4, 20, 2], [6, 20, 2], [8, 0x0800, 2], [10, 0, 2], [12, time, 2], [14, date, 2], [16, crc, 4], [20, n, 4], [24, n, 4], [28, name.length, 2], [30, 0, 2], [32, 0, 2], [34, 0, 2], [36, 0, 2], [38, 0, 4], [42, off, 4]]
+        .forEach(([o, v, s]) => s === 4 ? ch.setUint32(o, v, true) : ch.setUint16(o, v, true));
+      central.push(ch.buffer, name);
+      off += 30 + name.length + n;
+    }
+    const csize = central.reduce((a, p) => a + p.byteLength, 0);
+    const end = new DataView(new ArrayBuffer(22));
+    [[0, 0x06054b50, 4], [8, files.length, 2], [10, files.length, 2], [12, csize, 4], [16, off, 4]]
+      .forEach(([o, v, s]) => s === 4 ? end.setUint32(o, v, true) : end.setUint16(o, v, true));
+    return new Blob([...parts, ...central, end.buffer], { type: "application/zip" });
+  }
+
+  const label = (c) => (c === "wiiu" ? "Wii U" : "Switch");
+  function setMsg(text, kind) { const m = $("msg"); m.textContent = text; m.className = "msg" + (kind ? " " + kind : ""); }
+
+  function show(r, srcCount) {
+    converted = r;
+    $("resTitle").textContent = `${label(r.from)} save → ${label(r.to)}`;
+    const slot = r.files.find((f) => /^[0-7]\/game_data\.sav$/.test(f.path));
+    const head = new DataView(slot.bytes.buffer, slot.bytes.byteOffset, 4).getUint32(0, r.to === "switch");
+    $("resVer").textContent = `header 0x${head.toString(16)} · ${r.version} layout`;
+    $("resRoute").innerHTML = "";
+    for (const [cls, txt] of [[r.from, label(r.from)], [null, "→"], [r.to, label(r.to)]]) {
+      const s = document.createElement("span"); s.className = cls ? "chip " + cls : "arrows"; s.textContent = txt; $("resRoute").append(s);
+    }
+    const n = (re) => r.files.filter((f) => re.test(f.action)).length;
+    $("counts").innerHTML = "";
+    for (const [k, v] of [["flag files swapped", n(/^swapped/)], ["tracker blocks", n(/^tracker/)], ["files copied", n(/copied/)], ["skipped", r.skipped.length]]) {
+      const s = document.createElement("span"), b = document.createElement("b"); b.textContent = v; s.append(b, " " + k); $("counts").append(s);
+    }
+    const rows = $("fileRows"); rows.innerHTML = "";
+    const all = [...r.files.map((f) => [f.path, f.action, false]), ...r.skipped.map((s) => [s.path, s.reason, true])]
+      .sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }));
+    for (const [p, what, skip] of all) {
+      const tr = document.createElement("tr"); if (skip) tr.className = "skip";
+      for (const t of [p, what.replace(/(\d{4,})/g, (x) => Number(x).toLocaleString())]) { const td = document.createElement("td"); td.textContent = t; tr.append(td); }
+      rows.append(tr);
+    }
+    $("save").disabled = false; $("reset").hidden = false;
+    setMsg(`Read ${srcCount} files. Ready to save as a .zip for ${label(r.to)}.`, "ok");
+  }
+
+  async function handle(entries) {
+    if (!entries.length) return;
+    setMsg("Reading files…");
+    try {
+      const files = await Promise.all(entries.map(async ({ path, file }) => ({ path, bytes: new Uint8Array(await file.arrayBuffer()) })));
+      show(BotWConv.convertFolder(files), files.length);
+    } catch (e) {
+      converted = null; $("save").disabled = true;
+      setMsg(e.message || String(e), "err");
+    }
+  }
+
+  $("pick").addEventListener("change", (e) => {
+    handle([...e.target.files].map((f) => ({ path: f.webkitRelativePath || f.name, file: f })));
+    e.target.value = "";
+  });
+  $("pickLabel").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("pick").click(); } });
+
+  // Dropped folders arrive as FileSystemEntry trees.
+  const readAll = (reader) => new Promise((res, rej) => { const out = []; const step = () => reader.readEntries((b) => b.length ? (out.push(...b), step()) : res(out), rej); step(); });
+  async function walk(entry, prefix, out) {
+    if (entry.isFile) out.push({ path: prefix + entry.name, file: await new Promise((res, rej) => entry.file(res, rej)) });
+    else if (entry.isDirectory) for (const e of await readAll(entry.createReader())) await walk(e, prefix + entry.name + "/", out);
+  }
+  const drop = $("drop");
+  ["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave", "drop"].forEach((t) => drop.addEventListener(t, () => drop.classList.remove("over")));
+  drop.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    const roots = [...e.dataTransfer.items].map((i) => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+    const out = [];
+    try { for (const r of roots) await walk(r, "", out); } catch (err) { setMsg("Could not read the dropped folder. Try Choose folder instead.", "err"); return; }
+    handle(out);
+  });
+
+  $("save").addEventListener("click", async () => {
+    if (!converted) return;
+    const name = `BotW save (${label(converted.to)}).zip`, blob = makeZip(converted.files);
+    const downloads = window.claude && window.claude.use ? await window.claude.use("downloads") : null;
+    if (downloads) {
+      try { await downloads.save({ filename: name, data: blob }); setMsg(`Saved ${name}. Unzip it into the ${label(converted.to)} save folder.`, "ok"); }
+      catch (err) { setMsg(err && err.code === "declined" ? "Save cancelled." : `Could not save the file (${(err && err.code) || err}).`, err && err.code === "declined" ? "" : "err"); }
+      return;
+    }
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    setMsg(`Saved ${name}. Unzip it into the ${label(converted.to)} save folder.`, "ok");
+  });
+  $("reset").addEventListener("click", () => { $("pick").click(); });
+})();
+</script>
+
+</body></html>
