@@ -78,6 +78,7 @@ section.how { display: grid; gap: 14px; border-top: 1px solid var(--line); paddi
 .where h3 { font: 600 14px var(--body); margin: 0 }
 .where p, .where code { font-size: 13px; color: var(--muted) }
 code { font-family: var(--mono); font-size: .92em; word-break: break-all }
+a { color: var(--accent) }
 .foot { font-size: 13px; color: var(--muted) }
 @media (prefers-reduced-motion: reduce) { .drop { transition: none } }
 </style>
@@ -103,16 +104,16 @@ code { font-family: var(--mono); font-size: .92em; word-break: break-all }
   <section class="result" id="result" aria-live="polite">
     <div class="status">
       <h2 id="resTitle">Example: a Cemu save</h2>
-      <span class="ver" id="resVer">header 0x471b · v1.4 layout</span>
+      <span class="ver" id="resVer">header 0x471b · v1.5 layout</span>
     </div>
     <div class="route" id="resRoute"><span class="chip wiiu">Wii U</span><span class="arrows">→</span><span class="chip switch">Switch</span></div>
-    <div class="counts" id="counts"><span><b>13</b> flag files swapped</span><span><b>7</b> tracker blocks</span><span><b>26</b> files copied</span><span><b>1</b> skipped</span></div>
+    <div class="counts" id="counts"><span><b>14</b> flag files swapped</span><span><b>7</b> tracker blocks</span><span><b>26</b> files copied</span><span><b>1</b> skipped</span></div>
     <div class="files"><table><tbody id="fileRows">
       <tr><td>0/game_data.sav</td><td>swapped, 1,679 text words kept</td></tr>
       <tr><td>0/caption.sav</td><td>swapped, 6 text words kept</td></tr>
       <tr><td>tracker/trackblock00.sav</td><td>tracker</td></tr>
       <tr><td>album/pict_000.jpg</td><td>copied</td></tr>
-      <tr class="skip"><td>game_data.sav</td><td>not a real game_data.sav (344 bytes)</td></tr>
+      <tr class="skip"><td>.DS_Store</td><td>macOS metadata</td></tr>
     </tbody></table></div>
     <div class="btns">
       <button class="primary" id="save" disabled>Save converted .zip</button>
@@ -135,9 +136,9 @@ code { font-family: var(--mono); font-size: .92em; word-break: break-all }
     </table></div>
     <ul class="rules">
       <li><b>game_data.sav, caption.sav, option.sav:</b> every word reversed, except values of text flags (known hashes, or values starting with a known name like <code>Item</code>, <code>Weap</code>, <code>Obj_</code>).</li>
-      <li><b>trackblock*.sav</b> (Hero’s Path): first word as is, second word as two 16-bit values, the rest reversed.</li>
+      <li><b>trackblock*.sav</b> (Hero’s Path): first word as is, then one 16-bit value reversed, and every word from the third on reversed.</li>
       <li><b>Pictures</b> (album, Hyrule Compendium, slot thumbnails) are plain JPEGs and copied unchanged.</li>
-      <li>Same rules as BotWSaveManager 1.1.4, checked byte for byte against its output. Older saves are upgraded by the game when it loads them.</li>
+      <li>Same rules as <a href="https://github.com/ArchLeaders/BotwSaveManager">BotwSaveManager</a>, compared byte for byte with its conversion routine on real saves in both directions. The save keeps its game version: converting between consoles on the same update is the tested case.</li>
     </ul>
     <h2>Where the converted save goes</h2>
     <div class="where">
@@ -151,7 +152,7 @@ code { font-family: var(--mono); font-size: .92em; word-break: break-all }
 
 <script>
 // BotW save converter core: Wii U (big-endian) <-> Switch (little-endian).
-// Same rules as BotWSaveManager 1.1.4: every 32-bit word is byte-swapped except string
+// Same rules as BotwSaveManager (github.com/ArchLeaders/BotwSaveManager): every 32-bit word is byte-swapped except string
 // chunks (kept in file order on both consoles); trackblock headers are special.
 (function (root) {
   "use strict";
@@ -170,9 +171,13 @@ code { font-family: var(--mono); font-size: .92em; word-break: break-all }
     "Rema Site TBox TwnO Prie Dye0 Dye1 Map Play Oasi Cele Wolf Gata Ston Kaka Soji Hyru " +
     "Powe Lana Hate Akka Yash Dung BeeH Boar Boko Brig DgnO").split(" ");
 
+  // Header word -> game version. The first eight are BotwSaveManager's table; the rest are the
+  // extra headers in Marc Robledo's save editor (kiosk demo, modded 1.6, Switch 1.8/1.9).
   const VERSIONS = {
-    0x24e2: "v1.0", 0x24ee: "v1.1", 0x3ef8: "v1.2", 0x3ef9: "v1.3", 0x471a: "v1.3.3",
-    0x471b: "v1.4", 0x471e: "v1.5", 0x0f423d: "v1.6",
+    0x24e2: "v1.0", 0x24ee: "v1.1", 0x2588: "v1.2", 0x29c0: "v1.3", 0x3ef8: "v1.3.3",
+    0x471a: "v1.4", 0x471b: "v1.5", 0x471e: "v1.6",
+    0x2a46: "v1.3.1", 0x2f8e: "kiosk", 0x3ef9: "v1.3.4", 0x0f423d: "v1.6", 0x0f423e: "v1.6",
+    0x0f423f: "v1.6", 0x4730: "v1.8/v1.9",
   };
 
   function swap32(x) {
@@ -219,17 +224,16 @@ code { font-family: var(--mono); font-size: .92em; word-break: break-all }
     return { bytes: dst, kept };
   }
 
-  // trackblockNN.sav: word 0 as is, word 1 is two 16-bit values, the rest 32-bit values.
+  // trackblockNN.sav: word 0 as is, bytes 4-5 are one 16-bit value, bytes 6-7 as is (zero in
+  // every file seen), the rest 32-bit values. Same header handling as BotwSaveManager.
   function convertTrackblock(src) {
     const dst = new Uint8Array(src);
     if (src.length < 8) return dst;
-    dst[4] = src[5]; dst[5] = src[4]; dst[6] = src[7]; dst[7] = src[6];
+    dst[4] = src[5]; dst[5] = src[4];
     const n = src.length & ~3;
     for (let i = 8; i < n; i += 4) rev4(src, dst, i);
     return dst;
   }
-
-  const VALID_GAME_DATA_SIZES = new Set([896976, 897160, 897112, 907824, 1020648, 1027208, 1027216]);
 
   // files: [{path: "0/game_data.sav", bytes: Uint8Array}], path relative to the save root.
   // Returns {from, to, version, files: [{path, bytes, action}], skipped: [{path, reason}]}.
@@ -253,16 +257,14 @@ code { font-family: var(--mono); font-size: .92em; word-break: break-all }
       if (name === ".DS_Store" || name.startsWith("._")) { skipped.push({ path: f.path, reason: "macOS metadata" }); continue; }
       if (/^trackblock\d+\.sav$/.test(name)) { out.push({ path: f.path, bytes: convertTrackblock(f.bytes), action: "tracker" }); continue; }
       if (name === "game_data.sav" || name === "caption.sav" || name === "option.sav") {
+        // A file already in the target byte order is left alone; one with an unknown header is
+        // converted like the rest (BotwSaveManager converts every .sav without looking at it).
         const d = detect(f.bytes);
-        if (!d) { skipped.push({ path: f.path, reason: "unrecognised header" }); continue; }
-        if (name === "game_data.sav" && !VALID_GAME_DATA_SIZES.has(f.bytes.length)) {
-          skipped.push({ path: f.path, reason: `not a real game_data.sav (${f.bytes.length} bytes)` }); continue;
-        }
-        if (d.console !== from) {
+        if (d && d.console !== from) {
           out.push({ path: f.path, bytes: new Uint8Array(f.bytes), action: "already in target format, copied" }); continue;
         }
         const r = convertFlags(f.bytes);
-        out.push({ path: f.path, bytes: r.bytes, action: `swapped, ${r.kept} text words kept` });
+        out.push({ path: f.path, bytes: r.bytes, action: `swapped, ${r.kept} text words kept` + (d ? "" : " (unknown header)") });
         continue;
       }
       out.push({ path: f.path, bytes: new Uint8Array(f.bytes), action: "copied" });
