@@ -1,6 +1,6 @@
 # BotW Save Converter
 
-Converts a Breath of the Wild save between Wii U (Cemu) and Switch (Ryujinx), in either direction.
+Converts a Breath of the Wild save between Wii U (Cemu) and Switch , in either direction.
 
 **Use it here: https://vasist15-source.github.io/botw-save-converter/**
 
